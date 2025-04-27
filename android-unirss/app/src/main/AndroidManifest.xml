@@ -8,13 +8,13 @@
   <application
 
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="Uniquiz"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:icon="@mipmap/rss"
+        android:label="Unirss"
+        android:roundIcon="@mipmap/rss"
         android:supportsRtl="true"
         android:theme="@android:style/Theme">
         <activity
-            android:name="com.jedugsem.uniquiz.MainActivity"
+            android:name="com.jedugsem.unirss.MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|locale|keyboardHidden"
             android:windowSoftInputMode="stateVisible|adjustResize"
             android:exported="true">
@@ -23,7 +23,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <meta-data android:name="android.app.lib_name" android:value="uniquiz" />
+            <meta-data android:name="android.app.lib_name" android:value="unirss" />
         </activity>
     </application>
 

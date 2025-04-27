@@ -338,10 +338,10 @@ impl Controls {
             _ => theme::Theme::default(),
         };
         let editor = match &state.loaded {
-            Some(Loaded {
-                search: Some(search),
-                ..
-            }) => text_editor::Content::with_text(&search.search.clone()),
+            //Some(Loaded {
+            //    search: Some(search),
+            //    ..
+            //}) => text_editor::Content::with_text(&search.search.clone()),
             _ => text_editor::Content::new(),
         };
         Controls {
