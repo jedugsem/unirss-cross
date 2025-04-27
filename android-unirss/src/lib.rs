@@ -25,8 +25,8 @@ use iced_winit::winit::platform::android::EventLoopBuilderExtAndroid;
 use log::LevelFilter;
 use scene::Scene;
 use std::sync::Arc;
-use uniquiz::Uniquiz;
-use uniquiz::{Controls, UserEvent};
+use unirss::Uniquiz;
+use unirss::{Controls, UserEvent};
 use winit::{
     event::WindowEvent,
     event_loop::{ControlFlow, EventLoop},
@@ -95,7 +95,7 @@ impl winit::application::ApplicationHandler<UserEvent> for Runner {
                     controls, window, ..
                 } = self
                 {
-                    controls.update(uniquiz::Message::Back);
+                    controls.update(unirss::Message::Back);
                     window.request_redraw();
                 }
             }
