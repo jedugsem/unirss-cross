@@ -1,0 +1,16 @@
+[workspace]
+members = ["unirss"]
+default-members = ["unirss"]
+resolver = "2"
+exclude = ["android-unirss"]
+
+[workspace.package]
+version = "0.3.1"
+authors = ["Jedug Sem"]
+edition = "2021"
+repository = "https://gitlab.com/jedugsem/unirss"
+readme = "README.md"
+
+[workspace.dependencies]
+iced-material = { path = "../iced-material" }
+
