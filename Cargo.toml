@@ -12,5 +12,10 @@ repository = "https://gitlab.com/jedugsem/unirss"
 readme = "README.md"
 
 [workspace.dependencies]
-iced-material = { path = "../iced-material" }
+iced-material = { git = "https://github.com/jedugsem/iced-material" }
 
+# [profile.release]
+# strip= true
+# lto =true
+# opt-level = "z"
+# panic="abort"

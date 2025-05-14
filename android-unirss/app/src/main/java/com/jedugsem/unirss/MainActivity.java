@@ -7,9 +7,18 @@ import android.content.Context;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.inputmethod.InputMethodManager;
-
+import android.content.Intent;
+import android.net.Uri;
+import android.provider.Settings;
+import android.content.pm.PackageManager;
+import androidx.core.content.ContextCompat;
+import android.os.Environment;
 public class MainActivity extends NativeActivity {
-
+    private void permissionstorage(){
+        Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+        intent.setData(Uri.parse("package:" + getPackageName()));
+        startActivity(intent);
+    }
     static {
         System.loadLibrary("unirss");
     }
@@ -17,6 +26,13 @@ public class MainActivity extends NativeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (Environment.isExternalStorageManager()) {
+            // Do something ...
+        }else {
+            permissionstorage();
+
+        }
+
     }
 
     private void showKeyboard() {

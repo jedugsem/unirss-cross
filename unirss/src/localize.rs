@@ -10,7 +10,7 @@ pub struct Lang {
 #[macro_export]
 macro_rules! fl {
     ($message_id:literal) => {{
-        crate::localize::fl($message_id)
+        $crate::localize::fl($message_id)
     }};
 }
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ pub fn fl(base: &str) -> String {
     };
 
     let mutex = LANGUAGES.lock().unwrap();
-    let language: &Lang = (*mutex).iter().filter(|y| y.name == lang).last().unwrap();
+    let language: &Lang = (*mutex).iter().filter(|y| y.name == lang).next_back().unwrap();
     match language.words.get(base) {
         Some(s) => s.to_string(),
         None => {

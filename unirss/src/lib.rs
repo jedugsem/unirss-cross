@@ -1,42 +1,93 @@
 #![allow(unreachable_code)]
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
+use feed_rs::model::Feed;
 #[cfg(not(target_os = "android"))]
 pub use iced::Renderer;
-
-use iced_graphics::text::cosmic_text::{fontdb::Source, Attrs};
+pub fn dir() -> PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        PathBuf::from("/storage/emulated/0/.uni/unirss")
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        PathBuf::from("/home/me/.local/share/unirss")
+    }
+}
+use iced_widget::markdown;
+use pages::{
+    add_url::AddM, artikle_list::ArtikleListM, feed_list::feeds_unread, feed_view::FeedViewM,
+};
 use ron::de::from_bytes;
 use serde::{Deserialize, Serialize};
-pub mod back;
+pub mod com;
 pub mod comps;
+pub mod favicons;
+pub mod git;
 pub mod localize;
+mod pages;
 pub mod per;
 pub mod settings;
-use crate::back::back_message;
+use com::Com;
 use iced::{
-    widget::{column, container, responsive, row, text, text_editor, themer, Space},
-    Alignment, Length, Theme,
+    widget::{column, container, responsive, row, text_editor, themer, Space},
+    Length, Theme,
 };
-use iced_material::{header::header, sidebar::sidebar, theme};
+use iced_material::{header::header, theme};
 use iced_winit::runtime::Task;
-use per::Com;
-use settings::{Language, PSettings, SettingsM, Them};
+use pages::feed_list::FeedListM;
+use per::read_online_feeds;
+use settings::{PSettings, SettingsM, Them};
 //use sys_locale::get_locale;
 pub type Element<'a, Message> = iced::Element<'a, Message, theme::Theme, Renderer>;
 // State Top Down
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Uniquiz {
+    pub sett: Settings,
+    pub feed: Option<usize>,
+    pub artikle: Option<usize>,
+    pub unread_expanded: bool,
+    pub all_expanded: bool,
+    pub url: String,
+
+    pub channels: Option<Vec<(feed_rs::model::Feed, per::Imag)>>,
     // Pages - Optional
     pub modules: Load,
     // Window
     pub window: Window,
     // Sidebar
-    pub loaded: Option<Loaded>,
-
+    pub read: Progress,
+    pub online_feeds: OnlineFeeds,
     // Settings
+    pub error: Vec<String>,
     pub settings: PSettings,
     // Loading - Modules
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Progress {
+    pub read: Vec<(String, Vec<String>)>,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub enum Settings {
+    #[default]
+    Normal,
+    Repo,
+    AddUrl,
+    ManageFeeds,
+}
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub enum Nav {
+    #[default]
+    Mixed,
+    All,
+    Some(usize),
+    None,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OnlineFeeds {
+    pub urls: Vec<(String, String)>,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Window {
@@ -45,21 +96,16 @@ pub struct Window {
     pub settings_open: bool,
     pub sideselect: bool,
     pub sidebar: bool,
-    pub tab: u8,
+    pub tab: (usize, Nav),
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Load {
     err: Option<String>,
 }
 
-// Loaded Database
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct Loaded {
-    pub prog: Option<usize>,
-}
 impl Default for Uniquiz {
     fn default() -> Self {
-        let settings = per::load_settings().unwrap_or(PSettings::default());
+        let settings = per::load_settings().unwrap_or_default();
 
         let mut lang = crate::localize::LANG.lock().unwrap();
         let mut languages = crate::localize::LANGUAGES.lock().unwrap();
@@ -73,11 +119,19 @@ impl Default for Uniquiz {
         }
 
         Self {
+            sett: Settings::default(),
+            error: vec![],
+            unread_expanded: false,
+            all_expanded: false,
+            online_feeds: OnlineFeeds::default(),
+            read: Progress::default(),
+            artikle: None,
+            feed: None,
+            channels: None,
+            url: String::new(),
             modules: Load { err: None },
             // Window
             // Sidebar
-            loaded: None,
-
             window: Window::default(),
             // Settings
             settings,
@@ -86,14 +140,31 @@ impl Default for Uniquiz {
         }
     }
 }
+type Loaded = (
+    (
+        Option<Vec<(Feed, per::Imag)>>,
+        Option<Vec<(String, String)>>,
+    ),
+    Option<Progress>,
+    OnlineFeeds,
+);
 #[derive(Debug, Clone)]
 pub enum Message {
-    Select(u8),
+    Sidebar(comps::sidebar::SidebarM),
+    Loaded((Loaded, bool)),
+    Error(String),
+    Refresh(Result<(), String>),
+    Boot,
+    Clipboard(String, u8),
+    FeedView(FeedViewM),
+    ArtikleList(ArtikleListM),
     Side,
+    FeedList(FeedListM),
+    Add(AddM),
     Back,
     Exit,
     Nothing,
-    EditorAction(text_editor::Action),
+    EditorAction(text_editor::Action, u8),
     ToggleSettings,
     Settings(SettingsM),
 }
@@ -101,7 +172,9 @@ const BREAKPOINT: f32 = 500.;
 impl Clone for Controls {
     fn clone(&self) -> Self {
         Controls {
-            editor: text_editor::Content::new(),
+            url_editor: text_editor::Content::new(),
+            name_editor: text_editor::Content::new(),
+            markdown: self.markdown.clone(),
             theme: self.theme.clone(),
             state: self.state.clone(),
             #[cfg(target_os = "android")]
@@ -115,10 +188,117 @@ impl Controls {
     pub fn title(&self) -> String {
         "Uniquiz".to_string()
     }
-
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::EditorAction(action) => match action {
+            Message::Sidebar(m) => self.update_sidebar(m),
+            Message::FeedView(m) => self.update_feed_view(m),
+            Message::Error(m) => {
+                self.state.error.push(m);
+                Com::none()
+            }
+            Message::ArtikleList(m) => self.update_artikle_list(m),
+            Message::Boot => {
+                if !dir().join("feeds").exists() {
+                    let _ = std::fs::create_dir_all(dir().join("feeds"));
+                    self.state.sett = Settings::Repo;
+                    self.state.window.settings_open = true;
+
+                    // Update git
+                    Com::none()
+                } else if !dir().join("git").exists() {
+                    self.state.sett = Settings::Repo;
+                    self.state.window.settings_open = true;
+                    // Update git
+                    Com::none()
+                } else {
+                    Com::perform(
+                        self,
+                        async move {
+                            (
+                                per::refresh(None).await,
+                                Some(per::read_progress().await),
+                                read_online_feeds().await,
+                            )
+                        },
+                        |x| Message::Loaded((x, false)),
+                    )
+
+                    // Dont
+                }
+            }
+            Message::Refresh(res) => {
+                match res {
+                    Ok(_) => {}
+                    Err(stf) => {
+                        self.state.error.push(stf);
+                    }
+                }
+                //
+                let git_state = self.state.settings.git.clone();
+                Com::perform(
+                    self,
+                    async move {
+                        (
+                            per::refresh(git_state).await,
+                            Some(per::read_progress().await),
+                            per::read_online_feeds().await,
+                        )
+                    },
+                    |x| Message::Loaded((x, true)),
+                )
+            }
+            Message::Loaded((((channels, icons), progress, online_feeds), git)) => {
+                self.state.online_feeds = online_feeds;
+                self.state.channels = channels;
+                if let Some(prog) = progress {
+                    self.state.read = prog;
+                }
+                if let Some(channels) = &self.state.channels {
+                    if feeds_unread(&self.state.read, channels) < 1 {
+                        self.state.window.tab.0 = 1;
+                    }
+                }
+                if git {
+                    if let Some(down) = icons {
+                        Com::perform(
+                            self,
+                            async move {
+                                favicons::favicons(down).await;
+                                (per::read_feeds(), None, read_online_feeds().await)
+                            },
+                            |x| Message::Loaded((x, true)),
+                        )
+                    } else {
+                        Com::none()
+                    }
+                } else {
+                    let git_state = self.state.settings.git.clone();
+                    Com::perform(
+                        self,
+                        async move {
+                            (
+                                per::refresh(git_state).await,
+                                Some(per::read_progress().await),
+                                per::read_online_feeds().await,
+                            )
+                        },
+                        |x| Message::Loaded((x, true)),
+                    )
+                }
+            }
+            Message::Clipboard(m, n) => {
+                match n {
+                    0 => self.name_editor.perform(text_editor::Action::Edit(
+                        text_editor::Edit::Paste(Arc::new(m)),
+                    )),
+                    1 => self.url_editor.perform(text_editor::Action::Edit(
+                        text_editor::Edit::Paste(Arc::new(m)),
+                    )),
+                    _ => {}
+                }
+                Com::none()
+            }
+            Message::EditorAction(action, editor) => match action {
                 text_editor::Action::Click(_) => {
                     #[cfg(target_os = "android")]
                     let _ = self.proxy.send_event(crate::UserEvent::ShowKeyboard);
@@ -129,32 +309,33 @@ impl Controls {
                     let _ = self.proxy.send_event(crate::UserEvent::HideKeyboard);
                     Com::none()
                 }
-                _ => Com::none(),
-                // text_editor::Action::Edit(_) => {
-                //     if let Some(Loaded {
-                //         search: Some(_search),
-                //         ..
-                //     }) = &mut self.state.loaded
-                //     {
-                //         self.editor.perform(action);
-                //         let text = self.editor.text();
-                //         Com::perform(&self, async move { text }, |x| SearchM::Search(x).into())
-                //     } else {
-                //         Com::save(&self)
-                //     }
-                // }
-                //
-                // other => {
-                //     if let Some(Loaded {
-                //         search: Some(_search),
-                //         ..
-                //     }) = &mut self.state.loaded
-                //     {
-                //         self.editor.perform(other);
-                //     }
-                //     Com::none()
-                // }
+                text_editor::Action::Edit(_) => match editor {
+                    0 => {
+                        self.name_editor.perform(action);
+                        let text = self.name_editor.text();
+
+                        Com::perform(self, async move { text }, |x| AddM::ChangeName(x).into())
+                    }
+                    1 => {
+                        self.url_editor.perform(action);
+                        let text = self.url_editor.text();
+
+                        Com::perform(self, async move { text }, |x| AddM::ChangeUrl(x).into())
+                    }
+                    _ => Com::none(),
+                },
+
+                other => {
+                    match editor {
+                        0 => self.name_editor.perform(other),
+                        1 => self.url_editor.perform(other),
+                        _ => {}
+                    }
+                    Com::none()
+                }
             },
+            Message::FeedList(m) => self.update_feed_list(m),
+            Message::Add(m) => self.update_add_url(m),
             Message::Settings(m) => self.update_settings(m),
             Message::ToggleSettings => {
                 let window = &mut self.state.window;
@@ -170,12 +351,45 @@ impl Controls {
                         window.settings_open = !window.settings_open;
                     }
                 }
-                Com::save(&self)
+                Com::none()
             }
             Message::Back => {
+                if self.state.window.settings_open {
+                    match self.state.sett {
+                        Settings::ManageFeeds | Settings::Repo => {
+                            //
+                            self.state.sett = Settings::Normal;
+                        }
+                        Settings::Normal => {
+                            //
+                            self.state.window.settings_open = false;
+                        }
+                        Settings::AddUrl => {
+                            //
+                            self.state.sett = Settings::ManageFeeds;
+                        }
+                    }
+                } else if let (0 | 1, _x) = &self.state.window.tab {
+                    match &mut self.state {
+                        Uniquiz {
+                            feed,
+                            window,
+                            artikle: None,
+                            ..
+                        } if feed.is_some() => {
+                            *feed = None;
+                            window.tab.1 = Nav::All;
+                        }
+                        Uniquiz { feed, artikle, .. } if feed.is_some() && artikle.is_some() => {
+                            *artikle = None;
+                        }
+                        _ => {}
+                    }
+                }
                 //
-                let m = back_message(self.state.window.tab);
-                Com::perform(&self, async move { m }, |x| x)
+                //let m = back_message(self.state.window.tab);
+                //Com::perform(&self, async move { m }, |x| x)
+                Com::none()
             }
             Message::Exit => {
                 #[cfg(target_os = "android")]
@@ -184,11 +398,11 @@ impl Controls {
                     Com::none()
                 }
                 #[cfg(not(target_os = "android"))]
-                iced::window::get_latest().and_then(|id| iced::window::close(id))
+                iced::window::get_latest().and_then(iced::window::close)
             }
             Message::Side => {
                 let window = &mut self.state.window;
-                if window.sideselect == true {
+                if window.sideselect {
                     window.sideselect = false;
                     window.sidebar = true;
                 } else {
@@ -198,25 +412,6 @@ impl Controls {
                 Com::none()
             }
 
-            Message::Select(tab) => {
-                let window = &mut self.state.window;
-                if let Some(_loaded) = &mut self.state.loaded {
-                    window.settings_open = false;
-                    window.sideselect = true;
-                    window.tab = tab;
-
-                    match tab {
-                        _ => Com::none(),
-                    }
-                } else {
-                    if tab == 0 {
-                        window.settings_open = false;
-                        window.sideselect = true;
-                        window.tab = 0;
-                    }
-                    Com::none()
-                }
-            }
             Message::Nothing => Com::none(),
         }
     }
@@ -227,23 +422,9 @@ impl Controls {
             let content: Element<Message> = if window.settings_open {
                 self.view_settings()
             } else {
-                match window.tab {
-                    _ => text("failed").into(),
-                }
+                self.view_feed_list()
             };
-            let sidebar: Element<Message> = column!(sidebar(
-                &[
-                    &fl!("databases"),
-                    &fl!("ongoing"),
-                    &fl!("progress"),
-                    &fl!("select"),
-                    &fl!("test"),
-                    &fl!("search"),
-                ],
-                Message::Select,
-            ),)
-            .align_x(Alignment::Center)
-            .into();
+            let sidebar = self.view_sidebar();
 
             match (size, window.sidebar, window.sideselect) {
                 (s, true, _) if s.width > BREAKPOINT => row!(
@@ -269,7 +450,7 @@ impl Controls {
                     Message::Back,
                     Message::ToggleSettings,
                     Message::Exit,
-                    "Uniquiz"
+                    "Unirss"
                 ),
                 sidebar_widget,
                 Space::new(0, if cfg!(target_os = "android") { 17 } else { 0 })
@@ -289,7 +470,10 @@ mod android {
     pub use iced_winit::winit::event_loop::EventLoopProxy;
     #[derive(Debug)]
     pub enum UserEvent {
+        ClipboardRead(u8),
+        ClipboardWrite(String),
         ShowKeyboard,
+        Boot,
         Task(Message),
         HideKeyboard,
         Back,
@@ -298,7 +482,9 @@ mod android {
 #[cfg(target_os = "android")]
 pub use android::*;
 pub struct Controls {
-    pub editor: text_editor::Content<crate::Renderer>,
+    pub url_editor: text_editor::Content<crate::Renderer>,
+    pub name_editor: text_editor::Content<crate::Renderer>,
+    pub markdown: Option<Vec<markdown::Item>>,
     pub theme: theme::Theme,
     pub state: Uniquiz,
     #[cfg(target_os = "android")]
@@ -320,8 +506,11 @@ impl Default for Controls {
         } else {
             theme::Theme::default()
         };
+
         Self {
-            editor: text_editor::Content::new(),
+            markdown: None,
+            url_editor: text_editor::Content::new(),
+            name_editor: text_editor::Content::new(),
             theme,
             state: Uniquiz::default(),
         }
@@ -337,17 +526,15 @@ impl Controls {
             Some(Them::Default) => theme::Theme::default(),
             _ => theme::Theme::default(),
         };
-        let editor = match &state.loaded {
-            //Some(Loaded {
-            //    search: Some(search),
-            //    ..
-            //}) => text_editor::Content::with_text(&search.search.clone()),
-            _ => text_editor::Content::new(),
-        };
+        let url_editor = text_editor::Content::new();
+        let name_editor = text_editor::Content::new();
+
         Controls {
             state,
             theme,
-            editor,
+            markdown: None,
+            url_editor,
+            name_editor,
             background_color: Color::default(),
             proxy,
         }
