@@ -186,7 +186,7 @@ impl Clone for Controls {
 }
 impl Controls {
     pub fn title(&self) -> String {
-        "Uniquiz".to_string()
+        "Unirss".to_string()
     }
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
@@ -248,7 +248,8 @@ impl Controls {
                 )
             }
             Message::Loaded((((channels, icons), progress, online_feeds), git)) => {
-                self.state.online_feeds = online_feeds;
+                self.state.online_feeds = online_feeds.clone();
+                println!("online feeds: {:?}", online_feeds);
                 self.state.channels = channels;
                 if let Some(prog) = progress {
                     self.state.read = prog;

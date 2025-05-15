@@ -10,8 +10,6 @@ import android.view.inputmethod.InputMethodManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.provider.Settings;
-import android.content.pm.PackageManager;
-import androidx.core.content.ContextCompat;
 import android.os.Environment;
 public class MainActivity extends NativeActivity {
     private void permissionstorage(){
